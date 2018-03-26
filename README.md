@@ -1,4 +1,4 @@
-# openwindair
+# Life of Flowers - LoF
 Life of Flowers. Sensor for happy flower life.
 
 Скетч Arduino IDE для датчика влажности почвы, освещенности и температуры\влажновсти воздуха OpenWindAir.
