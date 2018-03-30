@@ -1,3 +1,10 @@
+/*  Life of Flowers.
+ *  Based on: ESP8266, AM2302 and Blynk.
+ *  Created in Arduino IDE.
+ *  For more details please visit http://openwind.ru
+ *  Contact us: hello@openwind.ru
+*/
+
 #include <FS.h>
 #include "version.h"
 
@@ -6,8 +13,8 @@
 #include <BlynkSimpleEsp8266.h>
 
 //RTC Time
-//#include <TimeLib.h>
-//#include <WidgetRTC.h>
+#include <TimeLib.h>
+#include <WidgetRTC.h>
 
 //WiFiManager
 #include <DNSServer.h>
@@ -34,48 +41,51 @@ WidgetLED led1(V10);
 WidgetLED led2(V11);
 Ticker ticker;
 
-//WidgetRTC rtc;
+WidgetRTC rtc;
 
+int ADCPin = A0;
+int PowerADCPin = 4;
+int PWMPin = 15;
+int BPin = 14;
+int C_DHTPin = 13;
 int buzPin = 5;
 int ledPin = 15;
-
-int adcPin = A0;
-int PadcPin = 4;
-int PWMPin = 15;
-//int APin = 15;
-int BPin = 14;
-int CPin = 13;
-
 int buttonPin = 0;
 int buttonState = 1;
 
 float adclight;
 float adcwater;
 float adcbattery;
-
 float q_w;
 float q_l;
-
-char blynk_token[34];
-
-bool DHTreadOK = false; //false if not read
-
 float h;
 float t;
 float f;
+
+// to del?
 float old_h = 0;
 float old_t = 0;
 float old_f = 0;
 
+bool DHTreadOK; //false if not read
+
+char blynk_token[34];
+
+//add EEPROM read + blynk widget
+double sleep_time = 600000000;
+//double sleep_time = 60000000;
+
 bool shouldSaveConfig = false; //flag for saving data
 
 //int days, hours, minutes, seconds;
-//String currentTime;
-//String currentDate;
+String currentTime;
+String currentDate;
 
-//BLYNK_CONNECTED(){
-//rtc.begin();
-//}
+BLYNK_CONNECTED(){
+rtc.begin();
+setSyncInterval(1); // interval of RTC sync
+Blynk.syncAll();
+}
 
 void tick(){
   //toggle state
@@ -100,29 +110,63 @@ void saveConfigCallback(){  //callback notifying us of the need to save config
 
 }
 
+
+//int n;
+float adcRead[3];
+void quickSort(float *s_arr, int first, int last){
+  if (first < last){
+      int left = first, right = last, middle = s_arr[(left + right) / 2];
+      do{
+        while (s_arr[left] < middle) left++;
+        while (s_arr[right] > middle) right--;
+        if (left <= right){
+          int tmp = s_arr[left];
+          s_arr[left] = s_arr[right];
+          s_arr[right] = tmp;
+          left++;
+          right--;
+        }
+      } 
+      while (left <= right);
+      quickSort(s_arr, first, right);
+      quickSort(s_arr, left, last);
+  }
+}
+
+void analogReadMedian(){
+
+  //add for
+  adcRead[0] = analogRead(ADCPin);
+  delay(10);
+  adcRead[1] = analogRead(ADCPin);
+  delay(10);
+  adcRead[2] = analogRead(ADCPin);
+  
+}
+
 void readADC(int input){
   switch(input){
     case 1 :
       digitalWrite(BPin, LOW);
-      digitalWrite(CPin, LOW);
+      digitalWrite(C_DHTPin, LOW);
       analogWrite(PWMPin, 412);
       delay(50);
-      adcwater = analogRead(adcPin);
+      adcwater = analogRead(ADCPin);
       analogWrite(PWMPin, 0);
       break;
     case 2 :
       digitalWrite(BPin, HIGH);
-      digitalWrite(CPin, LOW);
+      digitalWrite(C_DHTPin, LOW);
       delay(50);
-      adcbattery = analogRead(adcPin) * 4;
+      adcbattery = analogRead(ADCPin) * 4;
       digitalWrite(BPin, LOW);
       break;
     case 3 :
       digitalWrite(BPin, LOW);
-      digitalWrite(CPin, HIGH);
+      digitalWrite(C_DHTPin, HIGH);
       delay(50);
-      adclight = analogRead(adcPin);
-      //digitalWrite(CPin, LOW);
+      adclight = analogRead(ADCPin);
+      //digitalWrite(C_DHTPin, LOW);
       break;
     default :
       delay(1);
@@ -131,25 +175,23 @@ void readADC(int input){
   
 }
 
-
 void readADC_norm(int input){
   switch(input){
     case 1 :
       digitalWrite(BPin, HIGH);
-      digitalWrite(CPin, LOW);
+      digitalWrite(C_DHTPin, LOW);
       delay(50);
-      adcbattery = analogRead(adcPin) * 4;      
+      adcbattery = analogRead(ADCPin) * 4;      
       q_w = (adcbattery * 4) / 15;
-      q_l = (adcbattery * 25) / 101;
-   
+      q_l = (adcbattery * 25) / 101;   
       digitalWrite(BPin, LOW);
       break;
     case 2 :
       digitalWrite(BPin, LOW);
-      digitalWrite(CPin, LOW);
+      digitalWrite(C_DHTPin, LOW);
       analogWrite(PWMPin, 412);
       delay(50);
-      adcwater = analogRead(adcPin);
+      adcwater = analogRead(ADCPin);
       adcwater = 5*(100 - 100*(adcwater / q_w));
       if (adcwater > 100) adcwater = 100;
       if (adcwater < 0) adcwater = 0;
@@ -157,13 +199,13 @@ void readADC_norm(int input){
       break;      
     case 3 :
       digitalWrite(BPin, LOW);
-      digitalWrite(CPin, HIGH);
+      digitalWrite(C_DHTPin, HIGH);
       delay(50);
-      //adclight = analogRead(adcPin);
-      adclight = 100*(analogRead(adcPin) / q_l);
+      //adclight = analogRead(ADCPin);
+      adclight = 100*(analogRead(ADCPin) / q_l);
       if (adclight > 100) adclight = 100;
       if (adclight < 0) adclight = 0;
-      //digitalWrite(CPin, LOW);
+      //digitalWrite(C_DHTPin, LOW);
       break;
     default :
       delay(1);
@@ -173,9 +215,52 @@ void readADC_norm(int input){
   
 }
 
+void readADC_median(int input){
+  switch(input){
+    case 1 :
+      digitalWrite(BPin, HIGH);
+      digitalWrite(C_DHTPin, LOW);
+      delay(50);
+      analogReadMedian();
+      quickSort(adcRead, 0, 2);
+      adcbattery = adcRead[1] * 4;
+      q_w = (adcbattery * 4) / 15;
+      q_l = (adcbattery * 25) / 101; 
+      digitalWrite(BPin, LOW);
+      break;
+    case 2 :
+      digitalWrite(BPin, LOW);
+      digitalWrite(C_DHTPin, LOW);
+      analogWrite(PWMPin, 412);
+      delay(50);
+      analogReadMedian();
+      quickSort(adcRead, 0, 2);
+      //adcwater = adcRead[1];
+      adcwater = 5*(100 - 100*(adcRead[1] / q_w));
+      if (adcwater > 100) adcwater = 100;
+      if (adcwater < 0) adcwater = 0;
+      analogWrite(PWMPin, 0);
+      break;      
+    case 3 :
+      digitalWrite(BPin, LOW);
+      digitalWrite(C_DHTPin, HIGH);
+      delay(50);
+      analogReadMedian();
+      quickSort(adcRead, 0, 2);
+      //adclight = adcRead[1];
+      adclight = 100*(adcRead[1] / q_l);
+      if (adclight > 100) adclight = 100;
+      if (adclight < 0) adclight = 0;
+      break;
+    default :
+      delay(1);
+
+   } 
+  
+  
+}
 
 void readDHT22(){
-
   
   DHTreadOK = false;
   int i = 0;
@@ -185,35 +270,24 @@ void readDHT22(){
     h = dht.readHumidity();
     t = dht.readTemperature();
     f = dht.readTemperature(true); // Read temperature as Fahrenheit (isFahrenheit = true)
-  
+    
     if (isnan(h) || isnan(t) || isnan(f)){
       Serial.print(".");
       i++;
     }
     else{   
       DHTreadOK = true;
-
-       if (!isnan(h)){
-          old_h = h;}
-       if (!isnan(h)){
-          old_t = t;}
-       if (!isnan(h)){
-          old_f = f;}
-        
-      
+      if (!isnan(h)) old_h = h;
+      if (!isnan(t)) old_t = t;
+      if (!isnan(f)) old_f = f;
+    }
+    if (DHTreadOK){ 
+    Serial.print(" ok");
+    }
+    else{
+    Serial.print(" failed");
     }
   }
-  if (DHTreadOK){ 
-    led2.on();
-    led2.setColor(BLYNK_GREEN);
-    Serial.print(" ok");
-  }
-  else{
-    led2.on();
-    led2.setColor(BLYNK_RED);
-    Serial.print(" failed");
-  }
-  
 }
 
 void tone(uint8_t _pin, unsigned int frequency, unsigned long duration){
@@ -228,61 +302,62 @@ void tone(uint8_t _pin, unsigned int frequency, unsigned long duration){
 
 void setup(){
 
-  //WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
-  //WiFi.setSleepMode(WIFI_LIGHT_SLEEP);
   WiFi.forceSleepBegin();
   delay(1);
   dht.begin();
   Serial.begin(9600);
 
-  pinMode(PadcPin, OUTPUT);
+  pinMode(PowerADCPin, OUTPUT);
   pinMode(PWMPin, OUTPUT);
 
   pinMode(BPin, OUTPUT);
-  pinMode(CPin, OUTPUT);
+  pinMode(C_DHTPin, OUTPUT);
+  
   digitalWrite(BPin, LOW);
-  digitalWrite(CPin, LOW); 
+  digitalWrite(C_DHTPin, LOW);
+  digitalWrite(PowerADCPin, LOW);
+  analogWrite(PWMPin, 0); 
 
   pinMode(ledPin, OUTPUT);
   pinMode(buzPin, OUTPUT);
-  pinMode(buttonPin, INPUT);
   
-  pinMode(adcPin, INPUT);
+  pinMode(buttonPin, INPUT);  
+  pinMode(ADCPin, INPUT);
 
-   //ESP.wdtDisable();
-   //SPIFFS.format();
-   //read configuration from FS json
-    Serial.print("\n\rmounting FS...");
-    if (SPIFFS.begin()){  
-    Serial.println("mounted file system");
-    if (SPIFFS.exists("/config.json")) {
-      //file exists, reading and loading
-      Serial.println("reading config file");
-      File configFile = SPIFFS.open("/config.json", "r");
-      if (configFile){
-        Serial.println("opened config file");
-        size_t size = configFile.size();
-        // Allocate a buffer to store contents of the file.
-        std::unique_ptr<char[]> buf(new char[size]);
-
-        configFile.readBytes(buf.get(), size);
-        DynamicJsonBuffer jsonBuffer;
-        JsonObject& json = jsonBuffer.parseObject(buf.get());
-        json.printTo(Serial);
-        if (json.success()) {
-          Serial.println("\nparsed json");
-          strcpy(blynk_token, json["blynk_token"]);
-        } 
-        else{
-          Serial.println("Failed to load json config");
-        }
+  //ESP.wdtDisable();
+  //SPIFFS.format();
+  //read configuration from FS json
+  Serial.print("\n\rmounting FS...");
+  if (SPIFFS.begin()){  
+  Serial.println("mounted file system");
+  if (SPIFFS.exists("/config.json")) {
+    //file exists, reading and loading
+    Serial.println("reading config file");
+    File configFile = SPIFFS.open("/config.json", "r");
+    if (configFile){
+      Serial.println("opened config file");
+      size_t size = configFile.size();
+      // Allocate a buffer to store contents of the file.
+      std::unique_ptr<char[]> buf(new char[size]);
+  
+      configFile.readBytes(buf.get(), size);
+      DynamicJsonBuffer jsonBuffer;
+      JsonObject& json = jsonBuffer.parseObject(buf.get());
+      json.printTo(Serial);
+      if (json.success()) {
+        Serial.println("\nparsed json");
+        strcpy(blynk_token, json["blynk_token"]);
+      } 
+      else{
+        Serial.println("Failed to load json config");
       }
     }
+  }
   } 
-    else{
-      Serial.println("Failed to mount FS");
-    }
+  else{
+    Serial.println("Failed to mount FS");
+  }
  
   tone(5,1000,300);
   digitalWrite(ledPin, HIGH);
@@ -292,7 +367,7 @@ void setup(){
   delay(300);
   buttonState = digitalRead(buttonPin);
  
-//buttonState = 1;
+  //buttonState = 1;
   if (buttonState == 0){   
   
   //SPIFFS.format();
@@ -350,50 +425,34 @@ void setup(){
   
 }
 
-  Serial.print("\r\nStart!");
-
-  //WiFi.mode(WIFI_OFF);
-  //WiFi.forceSleepBegin();
-  //wifi_set_sleep_type(MODEM_SLEEP_T);
-
+  Serial.print("\n\rLet's start!");
   Serial.print("\n\rblynk token: ");
   Serial.print(blynk_token);
   Serial.print("\n\rSoftware version: ");
   Serial.print(SW_VERSION);
 
-  analogWriteFreq(75000);
-
-  
+  analogWriteFreq(75000);  
 
 }
 void loop(){
   
-  //  Serial.print("\r\nModem sleep");
-  //  WiFi.disconnect();
-  //  WiFi.forceSleepBegin();
-  //  delay(10000);
-
   Serial.print("\n\rWiFi status: ");
   Serial.print(WiFi.SSID());
   Serial.print(" ");
   Serial.print(WiFi.status());
 
- 
-  Serial.print("\r\nDo work");  
+  Serial.print("\r\nDo work");
   
-  digitalWrite(PadcPin, HIGH);
-  
-  for (int i = 1; i < 4; i++){  
-    readADC_norm(i);
+  digitalWrite(PowerADCPin, HIGH);
+  for (int i = 1; i < 4; i++){
+    readADC_median(i);
   }
+  digitalWrite(PowerADCPin, LOW);
   
+  // todo smth
   delay(5000);
-  Serial.print("\r\nreadDHT22");
   readDHT22();
-  digitalWrite(CPin, LOW);
-  digitalWrite(PadcPin, LOW);
-
-  //analogWrite(PadcPin, 0);
+  digitalWrite(C_DHTPin, LOW);
 
   int adcwater_int;
   int adclight_int;
@@ -407,7 +466,7 @@ void loop(){
   h_int = h;
   t_int = t;
  
-  Serial.print("\r\nADC (W L T H B): ");
+  Serial.print("\r\nResults (W L T H B): ");
   Serial.print(adcwater);
   Serial.print(" ");
   Serial.print(adclight);
@@ -418,12 +477,10 @@ void loop(){
   Serial.print(" ");
   Serial.print(adcbattery);
 
-  Serial.print("\r\nWake up modem");  
+  Serial.print("\r\nWake up modem:");  
   WiFi.forceSleepWake();
-
-   //WiFi.begin();
-   WiFi.mode(WIFI_STA);
-   delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
 
   if (WiFi.SSID()){
     WiFi.begin();
@@ -438,55 +495,82 @@ void loop(){
   //  Serial.print("\n\rIP: ");
   //  Serial.print(WiFi.localIP());
 
-   buttonState = digitalRead(buttonPin);
+  buttonState = digitalRead(buttonPin);
   if (buttonState == 0){
-    Serial.print("\n\rresetSettings");
+    Serial.print("\n\rReset WiFi settings");
     WiFiManager wifiManager;
     wifiManager.resetSettings();
   }
 
-  while(WiFi.status() != 3){
-  Serial.print("-"); 
-  delay(100);  
+  int i = 20;
+  while(WiFi.status() != 3 && i){
+    Serial.print("-"); 
+    delay(100);
+    i--;
   }
-  if (blynk_token[0] != '\0'){        
-    Blynk.config(blynk_token);
-    Blynk.connect();
-    //setSyncInterval(10*60); // interval of RTC sync
+
+  if (WiFi.status() == 3){  
+    if (blynk_token[0] != '\0'){        
+      Blynk.config(blynk_token);
+      Blynk.connect();        
+    }
+    Serial.print("\r\nConnecting blynk:");
+    delay(100);
+    Serial.print(".");
+    i = 40;
+    while(!Blynk.connected() && i){
+      Serial.print("."); 
+      delay(500); 
+      i--;
+    }
+    
+    if (Blynk.connected()){
+      currentTime = String(hour()) + ":" + minute() + ":" + second();
+      currentDate = String(day()) + "/" + month() + "/" + year();
+      Blynk.virtualWrite(V1, adclight_int);
+      Blynk.virtualWrite(V2, adcwater_int);
+      if(DHTreadOK){
+        Blynk.virtualWrite(V3, t_int);
+        Blynk.virtualWrite(V4, h_int);
+        led2.on();
+        led2.setColor(BLYNK_GREEN);
+      }
+      else{
+        led2.on();
+        led2.setColor(BLYNK_RED);        
+        }
+      Blynk.virtualWrite(V5, adcbattery_int);
+      Blynk.virtualWrite(V6, "\r\nLast sync: ");
+      Blynk.virtualWrite(V6, currentDate);
+      Blynk.virtualWrite(V6, " ");
+      Blynk.virtualWrite(V6, currentTime);
+      Serial.print("\r\nNow:");
+      Serial.print(currentDate);
+      Serial.print(" ");
+      Serial.print(currentTime);
+      Serial.print("\r\nSync blynk!");
+    }
+    else{
+      Serial.print("\r\nblynk not connected.");
+      sleep_time = 60000000; 
+    }
   }
-  delay(100);
-  //while(!Blynk.connected()){
-  //Serial.print("."); 
-  //delay(500); 
-  //}
-  if (Blynk.connected()){
-    Blynk.virtualWrite(V1, adclight_int);
-    Blynk.virtualWrite(V2, adcwater_int);
-    Blynk.virtualWrite(V3, t_int);
-    Blynk.virtualWrite(V4, h_int);
-    Blynk.virtualWrite(V5, adcbattery_int);
-    Serial.print("\r\nSync blynk");
+  else{
+    Serial.print("\r\nWiFi not connected.");
+    sleep_time = 60000000;
+    // ADD few retries and then reset WiFi sett. + EEPROM
   }
+
   Serial.print("\n\rWiFi status: ");
   Serial.print(WiFi.SSID());
   Serial.print(" ");
   Serial.print(WiFi.status());
-  
-  //  Serial.print("\r\nModem sleep");
-  //  WiFi.disconnect();
-  //  WiFi.forceSleepBegin();
-  //  delay(1);
 
-  Serial.print("\r\nDeep sleep");
-  Serial.print("\n\r");
-
-  //WiFi.disconnect(true);
-  delay(1);
+  Serial.print("\r\nDeep sleep for: "); 
+  Serial.print(sleep_time / 1000000);
+  Serial.print(" sec");
 
   //WAKE_RF_DISABLED to keep the WiFi radio disabled when we wake up
-  //ESP.deepSleep( SLEEPTIME, WAKE_RF_DISABLED );
-  
-  //ESP.deepSleep(59000000, WAKE_RF_DISABLED); // once a minute
-  ESP.deepSleep(3540000000, WAKE_RF_DISABLED); // once a hour
+  ESP.deepSleep(sleep_time, WAKE_RF_DISABLED);
   
 }
