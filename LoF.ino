@@ -6,8 +6,11 @@
 */
 
 #include <FS.h>
+//#include <EEPROM.h>
 #include "version.h"
+#include <string.h>
 
+#define BLYNK_PRINT Serial
 //blynk
 #include <ESP8266WiFi.h>
 #include <BlynkSimpleEsp8266.h>
@@ -56,11 +59,16 @@ int buttonState = 1;
 float adclight;
 float adcwater;
 float adcbattery;
-float q_w;
-float q_l;
 float h;
 float t;
 float f;
+
+int adcwater_int;
+int adclight_int;
+int adcbattery_int;
+int h_int;
+int t_int;
+
 
 // to del?
 float old_h = 0;
@@ -72,20 +80,65 @@ bool DHTreadOK; //false if not read
 char blynk_token[34];
 
 //add EEPROM read + blynk widget
-double sleep_time = 600000000;
-//double sleep_time = 60000000;
+double sleep_time = 3600; // 60 min
 
 bool shouldSaveConfig = false; //flag for saving data
 
-//int days, hours, minutes, seconds;
+int hour_i;
+int minute_i;
+int second_i;
+int day_i;
+int month_i;
+
+String hour_s;
+String minute_s;
+String second_s;
+String day_s;
+String month_s;
+
 String currentTime;
 String currentDate;
 
+//int address = 0;
+
+// Check flash size
+String realSize = String(ESP.getFlashChipRealSize());
+String ideSize = String(ESP.getFlashChipSize());
+bool flashCorrectlyConfigured = realSize.equals(ideSize);
+
+//if(flashCorrectlyConfigured){
+//  Serial.print("\r\nflash correctly configured, SPIFFS starts, IDE size: " + ideSize + ", match real size: " + realSize);
+//}
+//else{
+//  Serial.print("\r\nflash incorrectly configured, SPIFFS cannot start, IDE size: " + ideSize + ", real size: " + realSize);
+//}
+
+
+// NVM Data
+#define RTCMemOffset 10 // arbitrary location
+#define MAGIC_NUMBER 55 // used to know if the memory is good and been written to 
+
+typedef struct{
+    int wakeCount;
+    bool bFirstTime;
+    bool bShouldRepeat;
+    int magicNumber;
+} nvmData;
+
+nvmData sleepMemory;
+
+bool bDoneSleeping;
+
 BLYNK_CONNECTED(){
-rtc.begin();
-setSyncInterval(1); // interval of RTC sync
-Blynk.syncAll();
+  rtc.begin();
+  setSyncInterval(1); // interval of RTC sync
+  Blynk.syncAll();
+//  rtc.begin();
+//  setSyncInterval(1); // interval of RTC sync
+//  Blynk.syncAll();  
 }
+
+WidgetTerminal terminal(V6);
 
 void tick(){
   //toggle state
@@ -134,88 +187,15 @@ void quickSort(float *s_arr, int first, int last){
 }
 
 void analogReadMedian(){
-
   //add for
   adcRead[0] = analogRead(ADCPin);
   delay(10);
   adcRead[1] = analogRead(ADCPin);
   delay(10);
-  adcRead[2] = analogRead(ADCPin);
-  
+  adcRead[2] = analogRead(ADCPin);  
 }
 
-void readADC(int input){
-  switch(input){
-    case 1 :
-      digitalWrite(BPin, LOW);
-      digitalWrite(C_DHTPin, LOW);
-      analogWrite(PWMPin, 412);
-      delay(50);
-      adcwater = analogRead(ADCPin);
-      analogWrite(PWMPin, 0);
-      break;
-    case 2 :
-      digitalWrite(BPin, HIGH);
-      digitalWrite(C_DHTPin, LOW);
-      delay(50);
-      adcbattery = analogRead(ADCPin) * 4;
-      digitalWrite(BPin, LOW);
-      break;
-    case 3 :
-      digitalWrite(BPin, LOW);
-      digitalWrite(C_DHTPin, HIGH);
-      delay(50);
-      adclight = analogRead(ADCPin);
-      //digitalWrite(C_DHTPin, LOW);
-      break;
-    default :
-      delay(1);
-   } 
-  
-  
-}
-
-void readADC_norm(int input){
-  switch(input){
-    case 1 :
-      digitalWrite(BPin, HIGH);
-      digitalWrite(C_DHTPin, LOW);
-      delay(50);
-      adcbattery = analogRead(ADCPin) * 4;      
-      q_w = (adcbattery * 4) / 15;
-      q_l = (adcbattery * 25) / 101;   
-      digitalWrite(BPin, LOW);
-      break;
-    case 2 :
-      digitalWrite(BPin, LOW);
-      digitalWrite(C_DHTPin, LOW);
-      analogWrite(PWMPin, 412);
-      delay(50);
-      adcwater = analogRead(ADCPin);
-      adcwater = 5*(100 - 100*(adcwater / q_w));
-      if (adcwater > 100) adcwater = 100;
-      if (adcwater < 0) adcwater = 0;
-      analogWrite(PWMPin, 0);
-      break;      
-    case 3 :
-      digitalWrite(BPin, LOW);
-      digitalWrite(C_DHTPin, HIGH);
-      delay(50);
-      //adclight = analogRead(ADCPin);
-      adclight = 100*(analogRead(ADCPin) / q_l);
-      if (adclight > 100) adclight = 100;
-      if (adclight < 0) adclight = 0;
-      //digitalWrite(C_DHTPin, LOW);
-      break;
-    default :
-      delay(1);
-
-   } 
-  
-  
-}
-
-void readADC_median(int input){
+void readADC_median2(int input){
   switch(input){
     case 1 :
       digitalWrite(BPin, HIGH);
@@ -223,9 +203,7 @@ void readADC_median(int input){
       delay(50);
       analogReadMedian();
       quickSort(adcRead, 0, 2);
-      adcbattery = adcRead[1] * 4;
-      q_w = (adcbattery * 4) / 15;
-      q_l = (adcbattery * 25) / 101; 
+      adcbattery = adcRead[1] * 43 / 10;
       digitalWrite(BPin, LOW);
       break;
     case 2 :
@@ -235,10 +213,7 @@ void readADC_median(int input){
       delay(50);
       analogReadMedian();
       quickSort(adcRead, 0, 2);
-      //adcwater = adcRead[1];
-      adcwater = 5*(100 - 100*(adcRead[1] / q_w));
-      if (adcwater > 100) adcwater = 100;
-      if (adcwater < 0) adcwater = 0;
+      adcwater = adcRead[1];
       analogWrite(PWMPin, 0);
       break;      
     case 3 :
@@ -247,17 +222,11 @@ void readADC_median(int input){
       delay(50);
       analogReadMedian();
       quickSort(adcRead, 0, 2);
-      //adclight = adcRead[1];
-      adclight = 100*(adcRead[1] / q_l);
-      if (adclight > 100) adclight = 100;
-      if (adclight < 0) adclight = 0;
+      adclight = adcRead[1];
       break;
     default :
       delay(1);
-
-   } 
-  
-  
+   }  
 }
 
 void readDHT22(){
@@ -290,14 +259,12 @@ void readDHT22(){
   }
 }
 
-void tone(uint8_t _pin, unsigned int frequency, unsigned long duration){
-  
+void tone(uint8_t _pin, unsigned int frequency, unsigned long duration){  
   pinMode (_pin, OUTPUT);
   analogWriteFreq(frequency);
   analogWrite(_pin,500);
   delay(duration);
-  analogWrite(_pin,0);
-  
+  analogWrite(_pin,0);  
 }
 
 void setup(){
@@ -308,6 +275,47 @@ void setup(){
   dht.begin();
   Serial.begin(9600);
 
+  /* Woke up and entered setup */
+  bDoneSleeping = false;
+  
+  if(ESP.rtcUserMemoryRead((uint32_t)RTCMemOffset, (uint32_t*) &sleepMemory, sizeof(sleepMemory))){
+      if(sleepMemory.magicNumber != MAGIC_NUMBER) // memory got corrupt or this is the first time
+      {
+          sleepMemory.bFirstTime = true;
+          sleepMemory.bShouldRepeat = false;
+          sleepMemory.magicNumber = MAGIC_NUMBER;
+          sleepMemory.wakeCount = 0;
+      }
+      else
+      {
+          sleepMemory.wakeCount += 1; // incrememnt the sleep counter
+          sleepMemory.bFirstTime = false;
+      }
+  
+      if(sleepMemory.wakeCount >= 4 || sleepMemory.bShouldRepeat) // reset the counter and do whatever else you need to do since 4 hours have passed
+      {
+          sleepMemory.wakeCount = 0;
+          sleepMemory.bShouldRepeat = false;
+          bDoneSleeping = true;          
+      }   
+  
+      ESP.rtcUserMemoryWrite((uint32_t)RTCMemOffset, (uint32_t*) &sleepMemory, sizeof(sleepMemory)); // write the new values to memory
+  }
+  
+  if(!bDoneSleeping){
+    Serial.print("\r\nsleepMemory.wakeCount: ");
+    Serial.print(sleepMemory.wakeCount);  
+    Serial.print("\r\nGo to SLEEP");
+    sleep_time = sleep_time * 1000000;
+    ESP.deepSleep(sleep_time, WAKE_RF_DISABLED);
+  }
+  else{
+    Serial.print("\r\nsleepMemory.wakeCount: ");
+    Serial.print(sleepMemory.wakeCount);  
+    Serial.print("\r\nGo to WORK");
+  }
+ 
+ 
   pinMode(PowerADCPin, OUTPUT);
   pinMode(PWMPin, OUTPUT);
 
@@ -368,68 +376,65 @@ void setup(){
   buttonState = digitalRead(buttonPin);
  
   //buttonState = 1;
-  if (buttonState == 0){   
-  
-  //SPIFFS.format();
+  if (buttonState == 0){  
+    //SPIFFS.format();
+      
+    Serial.println("Enter WiFi config mode");
+    ticker.attach(0.6, tick);       
     
-  Serial.println("Enter WiFi config mode");
-  ticker.attach(0.6, tick);       
+    WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 33);   // was 32 length ???
+    WiFiManager wifiManager;
+    //set minimu quality of signal so it ignores AP's under that quality
+    //defaults to 8%
+    //wifiManager.setMinimumSignalQuality();
   
-  WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 33);   // was 32 length ???
-  WiFiManager wifiManager;
-  //set minimu quality of signal so it ignores AP's under that quality
-  //defaults to 8%
-  //wifiManager.setMinimumSignalQuality();
-
-  //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
-  wifiManager.setAPCallback(configModeCallback);
-
-  //set config save notify callback
-  wifiManager.setSaveConfigCallback(saveConfigCallback);
-
-  wifiManager.addParameter(&custom_blynk_token);   //add all your parameters here
-
-  //sets timeout until configuration portal gets turned off
-  //useful to make it all retry or go to sleep, in seconds
-  wifiManager.setTimeout(300);   // 5 minutes to enter data and then ESP resets to try again.
-
-  //fetches ssid and pass and tries to connect
-  //if it does not connect it starts an access point with the specified name
-
-  //wifiManager.resetSettings();
- 
-  if (!wifiManager.autoConnect("LoF - tap to config")){
-    ESP.restart();    
-  }  
-  ticker.detach();
-  strcpy(blynk_token, custom_blynk_token.getValue());    //read updated parameters  
-  if (shouldSaveConfig){      //save the custom parameters to FS
-    Serial.println("saving config");
-    DynamicJsonBuffer jsonBuffer;
-    JsonObject& json = jsonBuffer.createObject();
-    json["blynk_token"] = blynk_token;    
-    
-    File configFile = SPIFFS.open("/config.json", "w");
-    if (!configFile) {
-      Serial.println("Failed to open config file for writing");
+    //set callback that gets called when connecting to previous WiFi fails, and enters Access Point mode
+    wifiManager.setAPCallback(configModeCallback);
+  
+    //set config save notify callback
+    wifiManager.setSaveConfigCallback(saveConfigCallback);
+  
+    wifiManager.addParameter(&custom_blynk_token);   //add all your parameters here
+  
+    //sets timeout until configuration portal gets turned off
+    //useful to make it all retry or go to sleep, in seconds
+    wifiManager.setTimeout(300);   // 5 minutes to enter data and then ESP resets to try again.
+  
+    //fetches ssid and pass and tries to connect
+    //if it does not connect it starts an access point with the specified name
+  
+    //wifiManager.resetSettings();
+   
+    if (!wifiManager.autoConnect("LoF - tap to config")){
+      ESP.restart();    
     }  
-    json.printTo(Serial);
-    json.printTo(configFile);
-    configFile.close();
-    //end save
-    
-  delay(1000);
-  Serial.println("Restart ESP to apply new WiFi settings..");
-  ESP.restart();  
-  }
+    ticker.detach();
+    strcpy(blynk_token, custom_blynk_token.getValue());    //read updated parameters  
+    if (shouldSaveConfig){      //save the custom parameters to FS
+      Serial.println("saving config");
+      DynamicJsonBuffer jsonBuffer;
+      JsonObject& json = jsonBuffer.createObject();
+      json["blynk_token"] = blynk_token;    
+      
+      File configFile = SPIFFS.open("/config.json", "w");
+      if (!configFile) {
+        Serial.println("Failed to open config file for writing");
+      }  
+      json.printTo(Serial);
+      json.printTo(configFile);
+      configFile.close();
+      //end save
+      
+    delay(1000);
+    Serial.println("Restart ESP to apply new WiFi settings..");
+    ESP.restart();  
+    }
   
 }
 
   Serial.print("\n\rLet's start!");
-  Serial.print("\n\rblynk token: ");
-  Serial.print(blynk_token);
-  Serial.print("\n\rSoftware version: ");
-  Serial.print(SW_VERSION);
+  Serial.print("\n\rblynk token: " + String(blynk_token));
+  Serial.print("\n\rSoftware version: " + String(SW_VERSION));
 
   analogWriteFreq(75000);  
 
@@ -441,41 +446,47 @@ void loop(){
   Serial.print(" ");
   Serial.print(WiFi.status());
 
+  if(!flashCorrectlyConfigured){
+    Serial.print("\r\nflash incorrectly configured, SPIFFS cannot start, IDE size: " + ideSize + ", real size: " + realSize);
+  }
   Serial.print("\r\nDo work");
-  
+
+
   digitalWrite(PowerADCPin, HIGH);
   for (int i = 1; i < 4; i++){
-    readADC_median(i);
-  }
-  digitalWrite(PowerADCPin, LOW);
-  
+    readADC_median2(i);
+  }  
+
+
   // todo smth
   delay(5000);
   readDHT22();
   digitalWrite(C_DHTPin, LOW);
-
-  int adcwater_int;
-  int adclight_int;
-  int adcbattery_int;
-  int h_int;
-  int t_int;
+  digitalWrite(PowerADCPin, LOW);
   
   adcwater_int = adcwater;
   adclight_int = adclight;
   adcbattery_int = adcbattery;
   h_int = h;
   t_int = t;
+
+  if (adcwater_int > 880) adcwater_int = 880;
+  if (adcwater_int < 680) adcwater_int = 680;
+
+  adcwater_int = (adcwater_int - 680) / 2;
  
   Serial.print("\r\nResults (W L T H B): ");
-  Serial.print(adcwater);
+  Serial.print(adcwater_int);
   Serial.print(" ");
-  Serial.print(adclight);
+  Serial.print(adclight_int);
   Serial.print(" ");
   Serial.print(t);
   Serial.print(" ");
   Serial.print(h);
   Serial.print(" ");
-  Serial.print(adcbattery);
+  Serial.print(adcbattery_int);
+
+
 
   Serial.print("\r\nWake up modem:");  
   WiFi.forceSleepWake();
@@ -502,33 +513,62 @@ void loop(){
     wifiManager.resetSettings();
   }
 
-  int i = 20;
+  int t_w;
+  int t_b;
+
+  int i = 100;
   while(WiFi.status() != 3 && i){
     Serial.print("-"); 
-    delay(100);
+    delay(200);
     i--;
   }
 
+  t_w = (100-i)/5;
+
   if (WiFi.status() == 3){  
     if (blynk_token[0] != '\0'){        
-      Blynk.config(blynk_token);
+      //Blynk.config(blynk_token);
+      //Blynk.config(blynk_token, "blynk-cloud.com", 8442);
+      //Blynk.config(blynk_token, "h.100010001.xyz", 8442);
+      Blynk.config(blynk_token, IPAddress(192,168,0,250), 8080);
       Blynk.connect();        
     }
     Serial.print("\r\nConnecting blynk:");
-    delay(100);
-    Serial.print(".");
-    i = 40;
+
+    i = 100;
     while(!Blynk.connected() && i){
       Serial.print("."); 
-      delay(500); 
+      delay(200); 
       i--;
     }
+    t_b = (100-i)/5;
     
     if (Blynk.connected()){
-      currentTime = String(hour()) + ":" + minute() + ":" + second();
-      currentDate = String(day()) + "/" + month() + "/" + year();
+
+      hour_i = hour();
+      minute_i = minute();
+      second_i = second();
+      day_i = day();
+      month_i = month();
+      
+      hour_s = String(hour_i);
+      minute_s = String(minute_i);
+      second_s = String(second_i);
+      day_s = String(day_i);
+      month_s = String(month_i);
+      
+      if (hour_i < 10) hour_s = "0" + hour_s;
+      if (minute_i < 10) minute_s = "0" + minute_s;
+      if (second_i < 10) second_s = "0" + second_s;
+      if (day_i < 10) day_s = "0" + day_s;
+      if (month_i < 10) month_s = "0" + month_s;
+      
+      currentTime = hour_s + ":" + minute_s + ":" + second_s;
+      currentDate = day_s + "/" + month_s + "/" + String(year());
+      
       Blynk.virtualWrite(V1, adclight_int);
       Blynk.virtualWrite(V2, adcwater_int);
+      
       if(DHTreadOK){
         Blynk.virtualWrite(V3, t_int);
         Blynk.virtualWrite(V4, h_int);
@@ -539,25 +579,32 @@ void loop(){
         led2.on();
         led2.setColor(BLYNK_RED);        
         }
-      Blynk.virtualWrite(V5, adcbattery_int);
-      Blynk.virtualWrite(V6, "\r\nLast sync: ");
-      Blynk.virtualWrite(V6, currentDate);
-      Blynk.virtualWrite(V6, " ");
-      Blynk.virtualWrite(V6, currentTime);
-      Serial.print("\r\nNow:");
-      Serial.print(currentDate);
-      Serial.print(" ");
-      Serial.print(currentTime);
+      Blynk.virtualWrite(V5, adcbattery_int);            
+      Blynk.virtualWrite(V7, t_w);
+      Blynk.virtualWrite(V8, t_b);
+      
+      terminal.print("\r\nLast sync: " + currentDate + " " + currentTime);
+      terminal.print("\r\nwifi blynk timeout (v7-8): " + String(t_w) + " " + String(t_b));
+      terminal.print("\r\nIDE size: " + ideSize + ", real size: " + realSize);
+      terminal.flush();
+
+      Serial.print("\r\nLast sync:" + currentDate + " " + currentTime);
       Serial.print("\r\nSync blynk!");
     }
     else{
       Serial.print("\r\nblynk not connected.");
-      sleep_time = 60000000; 
+      sleep_time = 1800;
+      
+      sleepMemory.bShouldRepeat = true;
+      ESP.rtcUserMemoryWrite((uint32_t)RTCMemOffset, (uint32_t*) &sleepMemory, sizeof(sleepMemory));
     }
   }
   else{
     Serial.print("\r\nWiFi not connected.");
-    sleep_time = 60000000;
+    sleep_time = 1800;
+    sleepMemory.bShouldRepeat = true;
+    ESP.rtcUserMemoryWrite((uint32_t)RTCMemOffset, (uint32_t*) &sleepMemory, sizeof(sleepMemory));
+    
     // ADD few retries and then reset WiFi sett. + EEPROM
   }
 
@@ -566,9 +613,16 @@ void loop(){
   Serial.print(" ");
   Serial.print(WiFi.status());
 
+  Serial.print("\r\nwifi blynk timeout: "); 
+  Serial.print(t_w);
+  Serial.print(" ");
+  Serial.print(t_b);
   Serial.print("\r\nDeep sleep for: "); 
-  Serial.print(sleep_time / 1000000);
+  Serial.print(sleep_time);
   Serial.print(" sec");
+  sleep_time = sleep_time * 1000000;
+  
+  delay(10);
 
   //WAKE_RF_DISABLED to keep the WiFi radio disabled when we wake up
   ESP.deepSleep(sleep_time, WAKE_RF_DISABLED);
