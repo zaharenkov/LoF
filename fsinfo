@@ -1,0 +1,36 @@
+String sysInfo()
+{
+    FSInfo fs_info;
+    SPIFFS.info(fs_info);
+    String t = "--- FS INFO ---\n";
+    t += "totalBytes: " + String(fs_info.totalBytes) + "\n";
+    t += "usedBytes: " + String(fs_info.usedBytes) + "\n";
+    t += "blockSize: " + String(fs_info.blockSize) + "\n";
+    t += "pageSize: " + String(fs_info.pageSize) + "\n";
+    t += "maxOpenFiles: " + String(fs_info.maxOpenFiles) + "\n";
+    t += "maxPathLength: " + String(fs_info.maxPathLength) + "\n";
+    t += "\n";
+    t += "--- MISC ESP PROPERTIES --- \n";
+    t += "getFreeSketchSpace(): " + String(ESP.getFreeSketchSpace()) + "\n";
+    t += "getSketchSize(): " + String(ESP.getSketchSize()) + "\n";
+    t += "getChipId(): " + String(ESP.getChipId()) + "\n";
+    t += "getFlashChipMode(): " + String(ESP.getFlashChipMode()) + "\n";
+    t += "getFlashChipId(): " + String(ESP.getFlashChipId()) + "\n";
+    t += "getFlashChipRealSize(): " + String(ESP.getFlashChipRealSize()) + "\n";
+    t += "getFlashChipSize(): " + String(ESP.getFlashChipSize()) + "\n";
+    t += "getFlashChipSizeByChipId(): " + String(ESP.getFlashChipSizeByChipId()) + "\n";
+    t += "getFlashChipSpeed(): " + String(ESP.getFlashChipSpeed()) + "\n";
+    t += "checkFlashConfig(): " + String(ESP.checkFlashConfig()) + "\n";
+    t += "getBootMode(): " + String(ESP.getBootMode()) + "\n";
+    t += "getBootVersion(): " + String(ESP.getBootVersion()) + "\n";
+    t += "getCoreVersion(): " + String(ESP.getCoreVersion()) + "\n";
+    t += "getCpuFreqMHz(): " + String(ESP.getCpuFreqMHz()) + "\n";
+    t += "getCycleCount(): " + String(ESP.getCycleCount()) + "\n";
+    t += "getResetInfo(): " + String(ESP.getResetInfo()) + "\n";
+    t += "getResetReason(): " + String(ESP.getResetReason()) + "\n";
+    rst_info *myResetInfo;
+    myResetInfo = ESP.getResetInfoPtr();
+    t += "getResetInfoPtr(): " + String(myResetInfo->reason);
+ 
+    return t;
+}

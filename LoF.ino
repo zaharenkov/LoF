@@ -116,7 +116,7 @@ bool flashCorrectlyConfigured = realSize.equals(ideSize);
 
 // NVM Data
 #define RTCMemOffset 10 // arbitrary location
-#define MAGIC_NUMBER 55 // used to know if the memory is good and been written to 
+#define MAGIC_NUMBER 56 // used to know if the memory is good and been written to 
 
 typedef struct{
     int wakeCount;
@@ -259,7 +259,7 @@ void readDHT22(){
   }
 }
 
-void tone(uint8_t _pin, unsigned int frequency, unsigned long duration){  
+void tones(uint8_t _pin, unsigned int frequency, unsigned long duration){  
   pinMode (_pin, OUTPUT);
   analogWriteFreq(frequency);
   analogWrite(_pin,500);
@@ -284,7 +284,7 @@ void setup(){
           sleepMemory.bFirstTime = true;
           sleepMemory.bShouldRepeat = false;
           sleepMemory.magicNumber = MAGIC_NUMBER;
-          sleepMemory.wakeCount = 0;
+          sleepMemory.wakeCount = 4;
       }
       else
       {
@@ -327,7 +327,7 @@ void setup(){
   digitalWrite(PowerADCPin, LOW);
   analogWrite(PWMPin, 0); 
 
-  pinMode(ledPin, OUTPUT);
+  //pinMode(ledPin, OUTPUT);
   pinMode(buzPin, OUTPUT);
   
   pinMode(buttonPin, INPUT);  
@@ -367,23 +367,29 @@ void setup(){
     Serial.println("Failed to mount FS");
   }
  
-  tone(5,1000,300);
-  digitalWrite(ledPin, HIGH);
-  delay(400);
-  digitalWrite(ledPin, LOW);
+    tones(5,1000,300);
+    //analogWrite(PWMPin, 1000);
+    delay(500);
+    //analogWrite(PWMPin, 0);
+//  digitalWrite(ledPin, HIGH);
+//  digitalWrite(ledPin, LOW);
   
-  delay(300);
   buttonState = digitalRead(buttonPin);
  
   //buttonState = 1;
   if (buttonState == 0){  
     //SPIFFS.format();
-      
+   
+    //WiFi.disconnect(true);
+    
     Serial.println("Enter WiFi config mode");
     ticker.attach(0.6, tick);       
     
     WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 33);   // was 32 length ???
     WiFiManager wifiManager;
+
+    
+     
     //set minimu quality of signal so it ignores AP's under that quality
     //defaults to 8%
     //wifiManager.setMinimumSignalQuality();
@@ -457,12 +463,15 @@ void loop(){
     readADC_median2(i);
   }  
 
-
   // todo smth
-  delay(5000);
+  delay(4000);
+  //digitalWrite(ledPin, HIGH);
+  analogWrite(ledPin, 1000);
+  delay(1000);  
   readDHT22();
   digitalWrite(C_DHTPin, LOW);
   digitalWrite(PowerADCPin, LOW);
+  analogWrite(ledPin, 0);
   
   adcwater_int = adcwater;
   adclight_int = adclight;
@@ -485,8 +494,8 @@ void loop(){
   Serial.print(h);
   Serial.print(" ");
   Serial.print(adcbattery_int);
-
-
+  Serial.print(" adcwater: ");
+  Serial.print(adcwater);
 
   Serial.print("\r\nWake up modem:");  
   WiFi.forceSleepWake();
@@ -507,12 +516,13 @@ void loop(){
   //  Serial.print(WiFi.localIP());
 
   buttonState = digitalRead(buttonPin);
+  
   if (buttonState == 0){
     Serial.print("\n\rReset WiFi settings");
     WiFiManager wifiManager;
     wifiManager.resetSettings();
   }
-
+  digitalWrite(ledPin, LOW);
   int t_w;
   int t_b;
 
@@ -528,9 +538,10 @@ void loop(){
   if (WiFi.status() == 3){  
     if (blynk_token[0] != '\0'){        
       //Blynk.config(blynk_token);
-      //Blynk.config(blynk_token, "blynk-cloud.com", 8442);
+      //Blynk.config(blynk_token, "blynk-cloud.com", 8442);      
       //Blynk.config(blynk_token, "h.100010001.xyz", 8442);
-      Blynk.config(blynk_token, IPAddress(192,168,0,250), 8080);
+      //Blynk.config(blynk_token, IPAddress(192,168,0,250), 8080);
+      Blynk.config(blynk_token, "b.openwind.ru", 8080);
       Blynk.connect();        
     }
     Serial.print("\r\nConnecting blynk:");
@@ -567,7 +578,7 @@ void loop(){
       currentDate = day_s + "/" + month_s + "/" + String(year());
       
       Blynk.virtualWrite(V1, adclight_int);
-      Blynk.virtualWrite(V2, adcwater_int);
+      Blynk.virtualWrite(V2, adcwater);
       
       if(DHTreadOK){
         Blynk.virtualWrite(V3, t_int);
