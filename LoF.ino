@@ -28,12 +28,6 @@
 //LED status
 #include <Ticker.h>
 
-#include <DHT.h>
-
-#define DHTPIN 12
-#define DHTTYPE DHT22   // DHT 22  (AM2302), AM2321
-DHT dht(DHTPIN, DHTTYPE);
-
 #define BLYNK_GREEN     "#23C48E"
 #define BLYNK_BLUE      "#04C0F8"
 #define BLYNK_YELLOW    "#ED9D00"
@@ -51,33 +45,33 @@ int PowerADCPin = 4;
 int PWMPin = 15;
 int BPin = 14;
 int C_DHTPin = 13;
-int buzPin = 5;
+
 int ledPin = 15;
 int buttonPin = 0;
 int buttonState = 1;
 
-float adclight;
+
 float adcwater;
 float adcbattery;
-float h;
-float t;
-float f;
 
 int adcwater_int;
-int adclight_int;
 int adcbattery_int;
-int h_int;
-int t_int;
-
-
-// to del?
-float old_h = 0;
-float old_t = 0;
-float old_f = 0;
-
-bool DHTreadOK; //false if not read
 
 char blynk_token[34];
+char blynk_server[40];
+char blynk_port[6];
+char mqtt_server[40];
+char mqtt_port[6];
+char mqtt_login[24];
+char mqtt_key[24];
+char uniq_id[6];
+
+char mqtt_topic_pub[48];
+char mqtt_topic_pub_status[48];
+char mqtt_topic_pub_h[48];
+char mqtt_topic_pub_t[48];
+char mqtt_topic_pub_f[48];
+char mqtt_topic_pub_ppm[48];
 
 //add EEPROM read + blynk widget
 double sleep_time = 3600; // 60 min
@@ -216,55 +210,17 @@ void readADC_median2(int input){
       adcwater = adcRead[1];
       analogWrite(PWMPin, 0);
       break;      
-    case 3 :
+    case 3 : // удалить совсем и что со мультиплексором?
       digitalWrite(BPin, LOW);
       digitalWrite(C_DHTPin, HIGH);
       delay(50);
       analogReadMedian();
       quickSort(adcRead, 0, 2);
-      adclight = adcRead[1];
+      //adclight = adcRead[1];
       break;
     default :
       delay(1);
    }  
-}
-
-void readDHT22(){
-  
-  DHTreadOK = false;
-  int i = 0;
-  Serial.print("\n\rReading DHT22 sensor:");
-  while (i < 5 && !DHTreadOK){
-    delay(i*75);
-    h = dht.readHumidity();
-    t = dht.readTemperature();
-    f = dht.readTemperature(true); // Read temperature as Fahrenheit (isFahrenheit = true)
-    
-    if (isnan(h) || isnan(t) || isnan(f)){
-      Serial.print(".");
-      i++;
-    }
-    else{   
-      DHTreadOK = true;
-      if (!isnan(h)) old_h = h;
-      if (!isnan(t)) old_t = t;
-      if (!isnan(f)) old_f = f;
-    }
-    if (DHTreadOK){ 
-    Serial.print(" ok");
-    }
-    else{
-    Serial.print(" failed");
-    }
-  }
-}
-
-void tones(uint8_t _pin, unsigned int frequency, unsigned long duration){  
-  pinMode (_pin, OUTPUT);
-  analogWriteFreq(frequency);
-  analogWrite(_pin,500);
-  delay(duration);
-  analogWrite(_pin,0);  
 }
 
 void setup(){
@@ -272,7 +228,6 @@ void setup(){
   WiFi.mode(WIFI_OFF);
   WiFi.forceSleepBegin();
   delay(1);
-  dht.begin();
   Serial.begin(9600);
 
   /* Woke up and entered setup */
@@ -328,7 +283,6 @@ void setup(){
   analogWrite(PWMPin, 0); 
 
   //pinMode(ledPin, OUTPUT);
-  pinMode(buzPin, OUTPUT);
   
   pinMode(buttonPin, INPUT);  
   pinMode(ADCPin, INPUT);
@@ -356,6 +310,11 @@ void setup(){
       if (json.success()) {
         Serial.println("\nparsed json");
         strcpy(blynk_token, json["blynk_token"]);
+        strcpy(uniq_id, json["uniq_id"]);
+        strcpy(mqtt_server, json["mqtt_server"]);
+        strcpy(mqtt_port, json["mqtt_port"]);
+        strcpy(mqtt_login, json["mqtt_login"]);
+        strcpy(mqtt_key, json["mqtt_key"]);       
       } 
       else{
         Serial.println("Failed to load json config");
@@ -367,12 +326,11 @@ void setup(){
     Serial.println("Failed to mount FS");
   }
  
-    tones(5,1000,300);
     //analogWrite(PWMPin, 1000);
     delay(500);
     //analogWrite(PWMPin, 0);
-//  digitalWrite(ledPin, HIGH);
-//  digitalWrite(ledPin, LOW);
+    //  digitalWrite(ledPin, HIGH);
+    //  digitalWrite(ledPin, LOW);
   
   buttonState = digitalRead(buttonPin);
  
@@ -386,6 +344,14 @@ void setup(){
     ticker.attach(0.6, tick);       
     
     WiFiManagerParameter custom_blynk_token("blynk", "blynk token", blynk_token, 33);   // was 32 length ???
+    WiFiManagerParameter custom_uniq_id("id", "uniq id", uniq_id, 5);
+    WiFiManagerParameter custom_mqtt_server("server", "mqtt server", mqtt_server, 40);
+    WiFiManagerParameter custom_mqtt_port("port", "mqtt port", mqtt_port, 5);
+    WiFiManagerParameter custom_mqtt_login("login", "mqtt login", mqtt_login, 23);
+    WiFiManagerParameter custom_mqtt_key("key", "mqtt key", mqtt_key, 23);
+
+
+    
     WiFiManager wifiManager;
 
     
@@ -401,6 +367,12 @@ void setup(){
     wifiManager.setSaveConfigCallback(saveConfigCallback);
   
     wifiManager.addParameter(&custom_blynk_token);   //add all your parameters here
+    wifiManager.addParameter(&custom_uniq_id);
+    wifiManager.addParameter(&custom_mqtt_server);
+    wifiManager.addParameter(&custom_mqtt_port);
+    wifiManager.addParameter(&custom_mqtt_login);
+    wifiManager.addParameter(&custom_mqtt_key);
+
   
     //sets timeout until configuration portal gets turned off
     //useful to make it all retry or go to sleep, in seconds
@@ -415,13 +387,24 @@ void setup(){
       ESP.restart();    
     }  
     ticker.detach();
-    strcpy(blynk_token, custom_blynk_token.getValue());    //read updated parameters  
+    strcpy(blynk_token, custom_blynk_token.getValue());    //read updated parameters
+    strcpy(uniq_id, custom_uniq_id.getValue());
+    strcpy(mqtt_server, custom_mqtt_server.getValue());
+    strcpy(mqtt_port, custom_mqtt_port.getValue());
+    strcpy(mqtt_login, custom_mqtt_login.getValue());
+    strcpy(mqtt_key, custom_mqtt_key.getValue());
+    
     if (shouldSaveConfig){      //save the custom parameters to FS
       Serial.println("saving config");
       DynamicJsonBuffer jsonBuffer;
       JsonObject& json = jsonBuffer.createObject();
-      json["blynk_token"] = blynk_token;    
-      
+      json["blynk_token"] = blynk_token;
+      json["uniq_id"] = uniq_id;
+      json["mqtt_server"] = mqtt_server;
+      json["mqtt_port"] = mqtt_port;
+      json["mqtt_login"] = mqtt_login;
+      json["mqtt_key"] = mqtt_key;
+            
       File configFile = SPIFFS.open("/config.json", "w");
       if (!configFile) {
         Serial.println("Failed to open config file for writing");
@@ -468,16 +451,14 @@ void loop(){
   //digitalWrite(ledPin, HIGH);
   analogWrite(ledPin, 1000);
   delay(1000);  
-  readDHT22();
+
   digitalWrite(C_DHTPin, LOW);
   digitalWrite(PowerADCPin, LOW);
   analogWrite(ledPin, 0);
   
   adcwater_int = adcwater;
-  adclight_int = adclight;
   adcbattery_int = adcbattery;
-  h_int = h;
-  t_int = t;
+
 
   if (adcwater_int > 880) adcwater_int = 880;
   if (adcwater_int < 680) adcwater_int = 680;
@@ -486,12 +467,6 @@ void loop(){
  
   Serial.print("\r\nResults (W L T H B): ");
   Serial.print(adcwater_int);
-  Serial.print(" ");
-  Serial.print(adclight_int);
-  Serial.print(" ");
-  Serial.print(t);
-  Serial.print(" ");
-  Serial.print(h);
   Serial.print(" ");
   Serial.print(adcbattery_int);
   Serial.print(" adcwater: ");
@@ -576,20 +551,43 @@ void loop(){
       
       currentTime = hour_s + ":" + minute_s + ":" + second_s;
       currentDate = day_s + "/" + month_s + "/" + String(year());
+     
+      switch(strtoul(uniq_id, NULL, 10)){
+        case 0:
+          Blynk.virtualWrite(V10, adcwater);
+        break;
+        case 1:
+          Blynk.virtualWrite(V11, adcwater);
+        break;
+        case 2:
+          Blynk.virtualWrite(V12, adcwater);
+        break;
+        case 3:
+          Blynk.virtualWrite(V13, adcwater);
+        break;
+        case 4:
+          Blynk.virtualWrite(V14, adcwater);
+        break;
+        case 5:
+          Blynk.virtualWrite(V15, adcwater);
+        break;
+        case 6:
+          Blynk.virtualWrite(V16, adcwater);
+        break;
+        case 7:
+          Blynk.virtualWrite(V17, adcwater);
+        break;
+        case 8:
+          Blynk.virtualWrite(V18, adcwater);
+        break;
+        case 9:
+          Blynk.virtualWrite(V19, adcwater);
+        break;
+        default:
+          Blynk.virtualWrite(V2, adcwater);
+        break;                 
+      }      
       
-      Blynk.virtualWrite(V1, adclight_int);
-      Blynk.virtualWrite(V2, adcwater);
-      
-      if(DHTreadOK){
-        Blynk.virtualWrite(V3, t_int);
-        Blynk.virtualWrite(V4, h_int);
-        led2.on();
-        led2.setColor(BLYNK_GREEN);
-      }
-      else{
-        led2.on();
-        led2.setColor(BLYNK_RED);        
-        }
       Blynk.virtualWrite(V5, adcbattery_int);            
       Blynk.virtualWrite(V7, t_w);
       Blynk.virtualWrite(V8, t_b);
