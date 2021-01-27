@@ -1,7 +1,7 @@
 /*  Life of Flowers.
- *  Based on: ESP8266, AM2302 and Blynk.
+ *  Based on: ESP8266 and Blynk.
  *  Created in Arduino IDE.
- *  For more details please visit http://openwind.ru
+ *  For more details please visit https://openwind.ru
  *  Contact us: hello@openwind.ru
 */
 
